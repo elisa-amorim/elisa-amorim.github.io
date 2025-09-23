@@ -1,0 +1,146 @@
+---
+title: "Desafio 2"
+author: "Elisa Amorim Da Costa"
+format: html
+editor: visual
+---
+
+```{python}
+library(reticulate)
+
+# instala todas as dependências de uma vez
+reticulate::py_install(
+  packages = c("pandas", "numpy", "matplotlib", "seaborn"),
+  pip = TRUE
+)
+```
+
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import calendar
+from datetime import datetime
+
+
+def get_stats(chunk, pos=None):
+    # Filtrar companhias de interesse
+    subset = chunk[chunk["AIRLINE"].isin(["AA", "DL", "UA", "US"])]
+
+    # Remover NAs
+    subset = subset.dropna(subset=["ARRIVAL_DELAY", "YEAR", "MONTH", "DAY"])
+
+    # Calcular estatísticas
+    stats = (
+        subset.groupby(["YEAR", "MONTH", "DAY", "AIRLINE"])
+        .agg(
+            n_total=("ARRIVAL_DELAY", "size"),
+            n_atrasados=("ARRIVAL_DELAY", lambda x: (x > 10).sum())
+        )
+        .reset_index()
+    )
+    return stats
+
+
+#Colunas utilizadas
+colunas_interesse = ["YEAR", "MONTH", "DAY", "AIRLINE", "ARRIVAL_DELAY"]
+file = "flights.csv.zip"
+
+chunksize = 100000
+lista_chunks = []
+
+for chunk in pd.read_csv(file, usecols=colunas_interesse, chunksize=chunksize):
+    stats_parciais = get_stats(chunk)
+    lista_chunks.append(stats_parciais)
+
+stats_parciais = pd.concat(lista_chunks, ignore_index=True)
+
+
+
+# Estatísticas 
+
+def compute_stats(stats):
+    stats_finais = (
+        stats.groupby(["YEAR", "MONTH", "DAY", "AIRLINE"])
+        .agg(
+            n_total=("n_total", "sum"),
+            n_atrasados=("n_atrasados", "sum")
+        )
+        .reset_index()
+    )
+    stats_finais["Data"] = pd.to_datetime(
+        stats_finais[["YEAR", "MONTH", "DAY"]]
+    )
+    stats_finais["Perc"] = stats_finais["n_atrasados"] / stats_finais["n_total"]
+    stats_finais["Cia"] = stats_finais["AIRLINE"]
+    return stats_finais[["Cia", "Data", "Perc"]]
+
+stats_finais = compute_stats(stats_parciais)
+
+
+# Calendário com gradiente de cor nos dias
+
+def plot_calendar(stats, cia, year=2015):
+    df = stats[(stats["Cia"] == cia) & (stats["Data"].dt.year == year)].copy()
+    df["Month"] = df["Data"].dt.month
+    df["Day"] = df["Data"].dt.day
+
+    fig, axes = plt.subplots(3, 4, figsize=(20, 10))
+    for month in range(1, 13):
+        ax = axes[(month - 1) // 4, (month - 1) % 4]
+        month_days = calendar.monthrange(year, month)[1]
+        month_df = df[df["Month"] == month]
+
+        # Mapa diário
+        data = np.full((6, 7), np.nan)
+        day_labels = np.full((6, 7), "", dtype=object)
+
+        for _, row in month_df.iterrows():
+            weekday = row["Data"].weekday()  # segunda=0
+            week = (row["Day"] + calendar.monthrange(year, month)[0] - 1) // 7
+            data[week, weekday] = row["Perc"]
+            day_labels[week, weekday] = str(row["Day"])
+
+        # Heatmap
+        sns.heatmap(
+            data,
+            cmap="Blues",
+            cbar=False,
+            ax=ax,
+            linewidths=0.5,
+            linecolor="gray",
+            square=True,
+            vmin=0,
+            vmax=1
+        )
+
+        # Adiciona rótulos dos dias
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                if day_labels[i, j] != "":
+                    ax.text(
+                        j + 0.5, i + 0.5,
+                        day_labels[i, j],
+                        ha="center", va="center",
+                        color="black", fontsize=8, weight="bold"
+                    )
+
+        ax.set_title(calendar.month_abbr[month])
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    fig.suptitle(f"Percentual de Atrasos - {cia} ({year})", fontsize=20)
+    plt.tight_layout()
+    plt.show()
+
+
+
+# Gráficos por companhia
+
+plot_calendar(stats_finais, "AA", 2015)
+plot_calendar(stats_finais, "DL", 2015)
+plot_calendar(stats_finais, "UA", 2015)
+plot_calendar(stats_finais, "US", 2015)
+```
